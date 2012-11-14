@@ -71,9 +71,13 @@ module Mixlib
           @banner
         end
       end
+
+      def allow_default_overrides?
+        false
+      end
     end
     
-    attr_accessor :options, :config, :banner, :opt_parser
+    attr_accessor :options, :config, :banner, :opt_parser, :default_overrides
     
     # Create a new Mixlib::CLI class.  If you override this, make sure you call super!
     #
@@ -85,6 +89,8 @@ module Mixlib
     def initialize(*args)
       @options = Hash.new
       @config  = Hash.new
+      @default_overrides = Hash.new
+      @set_by = Hash.new
       
       # Set the banner
       @banner  = self.class.banner
@@ -103,11 +109,28 @@ module Mixlib
         config_opts[:exit] ||= nil
         
         if config_opts.has_key?(:default)
-          @config[config_key] = config_opts[:default]
+          set_config_by(:default, config_key, config_opts[:default])
         end
       end
       
       super(*args)
+    end
+
+    def set_config_by(set_type, key, value)
+      unless([:default, :override, :cli].include?(set_type))
+        raise "Expecting set type of :default, :override or :cli. Got #{set_type} instead"
+      end
+      @set_by[key] = set_type
+      @config[key] = value
+    end
+
+    def set_default_overrides!
+      if(self.class.allow_default_overrides?)
+        @default_overrides.each do |config_key, config_value|
+          if(@options.keys.include?(config_key) && @set_by[config_key] != :cli)
+          set_config_by(:default_override, config_key, config_value)
+        end
+      end
     end
     
     # Parses an array, by default ARGV, for command line options (as configured at 
@@ -118,6 +141,7 @@ module Mixlib
     # === Returns
     # argv<Array>:: Returns any un-parsed elements.
     def parse_options(argv=ARGV)
+      set_default_overrides!
       argv = argv.dup
       @opt_parser = OptionParser.new do |opts|  
         # Set the banner
@@ -140,7 +164,7 @@ module Mixlib
                       
           parse_block =
             Proc.new() do |c|
-              config[opt_key] = (opt_val[:proc] && opt_val[:proc].call(c)) || c
+              set_config_by(:cli, opt_key, (opt_val[:proc] && opt_val[:proc].call(c)) || c)
               puts opts if opt_val[:show_options]
               exit opt_val[:exit] if opt_val[:exit]
             end
